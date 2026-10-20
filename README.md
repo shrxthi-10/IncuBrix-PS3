@@ -15,6 +15,8 @@ An API-driven prototype that converts a written script into a narrated video usi
 - Scene manifests and render metadata.
 - Batch job submission and reporting.
 - Health, readiness, and API documentation endpoints.
+- Structured JSON request logs with correlation IDs and request duration.
+- API errors wrapped in the assessment-required `{"error": { ... }}` envelope.
 
 ## Technology Stack
 
@@ -135,7 +137,7 @@ Invoke-RestMethod `
     -Body $body
 ```
 
-The API returns a job ID and status URL when the job is accepted.
+The API returns a job ID and status URL when the job is accepted. Error responses use `{"error":{"code":"...","message":"...","retryable":false,"details":{}}}`.
 
 ## Check Job Status
 
@@ -155,7 +157,7 @@ When processing succeeds, the job result includes the generated video path and a
 python -m pytest -v
 ```
 
-The current verified test suite contains 11 passing tests covering API behavior, idempotency, request validation, and video-validation logic.
+The test suite covers API behavior, idempotency, request validation, error-envelope formatting, correlation IDs, and video-validation logic. Re-run tests on the assessment branch before claiming a passing count.
 
 ## Batch Processing
 
