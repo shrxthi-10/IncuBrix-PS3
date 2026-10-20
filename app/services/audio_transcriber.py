@@ -1,5 +1,6 @@
 from pathlib import Path
 from threading import Lock
+from typing import Any
 
 import av
 
@@ -11,7 +12,6 @@ def _compatible_av_open(*args, **kwargs):
 
 av.open = _compatible_av_open
 
-from faster_whisper import WhisperModel
 ROOT = Path(__file__).resolve().parents[2]
 MODEL_NAME = "tiny"
 
@@ -19,12 +19,14 @@ _model = None
 _model_lock = Lock()
 
 
-def get_model() -> WhisperModel:
-    """Load the local transcription model once, when first needed."""
+def get_model() -> Any:
+    """Load the transcription dependency/model only when audio is processed."""
     global _model
 
     with _model_lock:
         if _model is None:
+            from faster_whisper import WhisperModel
+
             _model = WhisperModel(
                 MODEL_NAME,
                 device="cpu",
