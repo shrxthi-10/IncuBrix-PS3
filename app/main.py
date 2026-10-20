@@ -1,4 +1,7 @@
 import hashlib
+import json
+import logging
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -28,6 +31,7 @@ app = FastAPI(
 )
 
 ALLOWED_AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a"}
+logger = logging.getLogger("incubrix.api")
 MAX_UPLOAD_BYTES = 100 * 1024 * 1024  # 100 MB
 
 
@@ -54,9 +58,27 @@ def error_response(status_code: int, error: dict) -> JSONResponse:
 @app.middleware("http")
 async def add_trace_id(request: Request, call_next):
     trace_id = request.headers.get("X-Correlation-ID", str(uuid4()))
-    response = await call_next(request)
-    response.headers["X-Correlation-ID"] = trace_id
-    return response
+    started = time.perf_counter()
+    status_code = 500
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        response.headers["X-Correlation-ID"] = trace_id
+        return response
+    finally:
+        path_parts = request.url.path.strip("/").split("/")
+        job_id = path_parts[-1] if len(path_parts) >= 4 and path_parts[-2] == "jobs" else None
+        logger.info(json.dumps({
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "level": "INFO",
+            "event": "http_request_completed",
+            "method": request.method,
+            "path": request.url.path,
+            "status_code": status_code,
+            "job_id": job_id,
+            "correlation_id": trace_id,
+            "duration_ms": round((time.perf_counter() - started) * 1000, 2),
+        }, separators=(",", ":")))
 
 
 @app.get("/health")
