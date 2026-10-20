@@ -1,4 +1,7 @@
 import hashlib
+import json
+import logging
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -14,9 +17,16 @@ from fastapi import (
 )
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from app.config import APP_NAME, API_PREFIX, MAX_AUDIO_SECONDS, TEST_INPUT_DIR
+from app.config import (
+    APP_NAME,
+    API_PREFIX,
+    MAX_AUDIO_SECONDS,
+    OUTPUT_DIR,
+    TEST_INPUT_DIR,
+)
 from app.services.job_manager import create_job, get_job
 from app.services.video_renderer import probe_duration
 from app.workers.job_worker import enqueue_job
@@ -27,7 +37,17 @@ app = FastAPI(
     description="API for generating narrated videos with matched B-roll.",
 )
 
+VIDEO_OUTPUT_DIR = OUTPUT_DIR / "rendered_videos"
+VIDEO_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+app.mount(
+    "/outputs/videos",
+    StaticFiles(directory=str(VIDEO_OUTPUT_DIR)),
+    name="rendered-videos",
+)
+
 ALLOWED_AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a"}
+logger = logging.getLogger("incubrix.api")
 MAX_UPLOAD_BYTES = 100 * 1024 * 1024  # 100 MB
 
 
@@ -46,12 +66,35 @@ def api_error(code: str, message: str, details=None, retryable=False):
     }
 
 
+def error_response(status_code: int, error: dict) -> JSONResponse:
+    """Return errors using the assessment's required envelope."""
+    return JSONResponse(status_code=status_code, content={"error": error})
+
+
 @app.middleware("http")
 async def add_trace_id(request: Request, call_next):
     trace_id = request.headers.get("X-Correlation-ID", str(uuid4()))
-    response = await call_next(request)
-    response.headers["X-Correlation-ID"] = trace_id
-    return response
+    started = time.perf_counter()
+    status_code = 500
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        response.headers["X-Correlation-ID"] = trace_id
+        return response
+    finally:
+        path_parts = request.url.path.strip("/").split("/")
+        job_id = path_parts[-1] if len(path_parts) >= 4 and path_parts[-2] == "jobs" else None
+        logger.info(json.dumps({
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "level": "INFO",
+            "event": "http_request_completed",
+            "method": request.method,
+            "path": request.url.path,
+            "status_code": status_code,
+            "job_id": job_id,
+            "correlation_id": trace_id,
+            "duration_ms": round((time.perf_counter() - started) * 1000, 2),
+        }, separators=(",", ":")))
 
 
 @app.get("/health")
@@ -225,7 +268,7 @@ async def submit_audio_job(
 
 
 @app.get(f"{API_PREFIX}/jobs/{{job_id}}")
-def job_status(job_id: str):
+def job_status(job_id: str, request: Request):
     job = get_job(job_id)
 
     if job is None:
@@ -238,7 +281,20 @@ def job_status(job_id: str):
             ),
         )
 
-    return job
+    response = job.copy()
+    result = job.get("result")
+
+    if job.get("status") == "succeeded" and result:
+        response["result"] = result.copy()
+        video_path = VIDEO_OUTPUT_DIR / f"{job_id}.mp4"
+
+        if video_path.is_file():
+            base_url = str(request.base_url).rstrip("/")
+            response["result"]["video_url"] = (
+                f"{base_url}/outputs/videos/{job_id}.mp4"
+            )
+
+    return response
 
 
 @app.exception_handler(HTTPException)
@@ -258,16 +314,16 @@ async def http_error_handler(request: Request, exc: HTTPException):
             retryable=exc.status_code >= 500,
         )
 
-    return JSONResponse(status_code=exc.status_code, content=error)
+    return error_response(exc.status_code, error)
 
 
 @app.exception_handler(RequestValidationError)
 async def validation_error_handler(
     request: Request, exc: RequestValidationError
 ):
-    return JSONResponse(
-        status_code=422,
-        content=api_error(
+    return error_response(
+        422,
+        api_error(
             "VALIDATION_ERROR",
             "The request contains missing or invalid fields.",
             {"errors": exc.errors()},
@@ -277,9 +333,9 @@ async def validation_error_handler(
 
 @app.exception_handler(Exception)
 async def unexpected_error_handler(request: Request, exc: Exception):
-    return JSONResponse(
-        status_code=500,
-        content=api_error(
+    return error_response(
+        500,
+        api_error(
             "INTERNAL_SERVER_ERROR",
             "An unexpected error occurred.",
             {

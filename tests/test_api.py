@@ -33,9 +33,10 @@ def test_unknown_job_returns_404():
     response = client.get("/api/v1/jobs/nonexistent-test-job")
 
     assert response.status_code == 404
-    assert response.json()["code"] == "JOB_NOT_FOUND"
-    assert response.json()["retryable"] is False
-    assert response.json()["details"]["job_id"] == "nonexistent-test-job"
+    error = response.json()["error"]
+    assert error["code"] == "JOB_NOT_FOUND"
+    assert error["retryable"] is False
+    assert error["details"]["job_id"] == "nonexistent-test-job"
 
 
 def test_create_job_returns_accepted_response(monkeypatch):
@@ -109,10 +110,11 @@ def test_reusing_idempotency_key_with_different_payload_returns_409(
 
     assert first.status_code == 202
     assert second.status_code == 409
-    assert second.json()["code"] == "IDEMPOTENCY_CONFLICT"
-    assert second.json()["retryable"] is False
-    assert "message" in second.json()
-    assert "details" in second.json()
+    error = second.json()["error"]
+    assert error["code"] == "IDEMPOTENCY_CONFLICT"
+    assert error["retryable"] is False
+    assert "message" in error
+    assert "details" in error
     
 def test_empty_script_is_rejected():
     response = client.post(
@@ -139,3 +141,28 @@ def test_missing_idempotency_key_is_rejected():
     )
 
     assert response.status_code == 422
+
+
+def test_validation_errors_use_required_error_envelope():
+    response = client.post(
+        "/api/v1/jobs",
+        headers={"Idempotency-Key": f"invalid-{uuid4()}"},
+        json={"script": ""},
+    )
+
+    assert response.status_code == 422
+    assert set(response.json()) == {"error"}
+    assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert set(response.json()["error"]) == {
+        "code", "message", "retryable", "details"
+    }
+
+
+def test_correlation_id_is_returned():
+    response = client.get(
+        "/health",
+        headers={"X-Correlation-ID": "assessment-test-correlation"},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["X-Correlation-ID"] == "assessment-test-correlation"
