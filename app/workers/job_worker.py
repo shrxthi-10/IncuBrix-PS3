@@ -13,7 +13,7 @@ INPUT_DIR = ROOT / "test_inputs"
 OUTPUT_DIR = ROOT / "outputs" / "rendered_videos"
 SUBTITLE_DIR = ROOT / "outputs" / "subtitles"
 
-EXECUTOR = ThreadPoolExecutor(max_workers=2)
+EXECUTOR = ThreadPoolExecutor(max_workers=1)
 
 VOICES = {
     "en": "en-US-AriaNeural",

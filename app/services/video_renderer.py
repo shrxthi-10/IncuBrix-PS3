@@ -6,8 +6,8 @@ ROOT = Path(__file__).resolve().parents[2]
 OUTPUT_DIR = ROOT / "outputs" / "rendered_videos"
 MANIFEST_DIR = ROOT / "outputs" / "render_manifests"
 
-VIDEO_WIDTH = 1280
-VIDEO_HEIGHT = 720
+VIDEO_WIDTH = 854
+VIDEO_HEIGHT = 480
 FPS = 25
 
 
@@ -104,9 +104,7 @@ def render_video(
         "-map", "[vout]",
         "-map", "[aout]",
         "-t", f"{audio_duration:.6f}",
-        "-c:v", "libx264",
-        "-preset", "veryfast",
-        "-crf", "23",
+        "-c:v", "libx264", "-threads", "1", "-preset", "ultrafast", "-crf", "28",
         "-pix_fmt", "yuv420p",
         "-c:a", "aac",
         "-b:a", "128k",
