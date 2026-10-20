@@ -1,0 +1,310 @@
+openapi: 3.1.0
+info:
+  title: IncuBrix Script-to-B-roll Video Engine API
+  version: 0.2.0
+  description: >
+    API for submitting asynchronous script-to-video jobs, checking their
+    status, and retrieving generated video and manifest paths.
+
+servers:
+  - url: http://127.0.0.1:8000
+    description: Local development server
+
+tags:
+  - name: Health
+  - name: Jobs
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      operationId: healthCheck
+      summary: Check application health
+      responses:
+        "200":
+          description: Application health information
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  timestamp:
+                    type: string
+                    format: date-time
+                required: [status, timestamp]
+
+  /ready:
+    get:
+      tags: [Health]
+      operationId: readinessCheck
+      summary: Check application readiness
+      responses:
+        "200":
+          description: Application reports readiness
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ready
+                required: [status]
+
+  /api/v1/:
+    get:
+      tags: [Health]
+      operationId: getApiInfo
+      summary: Get API information
+      responses:
+        "200":
+          description: API information
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name:
+                    type: string
+                  version:
+                    type: string
+                  status:
+                    type: string
+                required: [name, version, status]
+
+  /api/v1/jobs:
+    post:
+      tags: [Jobs]
+      operationId: createVideoJob
+      summary: Submit a script-to-video job
+      description: >
+        Creates an asynchronous job. Reusing an Idempotency-Key with the
+        same request returns the existing job. Reusing it with a different
+        request returns a conflict. Jobs are currently held in application
+        memory.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Unique client-generated key for this submission.
+          schema:
+            type: string
+            minLength: 1
+          example: 7a02f6de-1a8a-44e6-b1c8-29e3a8f3e9d0
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateJobRequest"
+            example:
+              script: "The water cycle moves water through evaporation and condensation."
+              aspect_ratio: "16:9"
+              narration_language: en
+      responses:
+        "202":
+          description: Job accepted or existing idempotent job returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobSubmission"
+        "409":
+          description: Idempotency key reused with a different request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HttpError"
+        "422":
+          description: Request validation error or missing idempotency key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationError"
+
+  /api/v1/jobs/{job_id}:
+    get:
+      tags: [Jobs]
+      operationId: getVideoJob
+      summary: Get job status and result
+      parameters:
+        - name: job_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Current job status, progress, and result if available
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobStatus"
+        "404":
+          description: Job ID not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HttpError"
+        "422":
+          description: Invalid job ID path parameter
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationError"
+
+components:
+  schemas:
+    CreateJobRequest:
+      type: object
+      properties:
+        script:
+          type: string
+          minLength: 1
+          maxLength: 50000
+        aspect_ratio:
+          type: string
+          default: "16:9"
+        narration_language:
+          type: string
+          default: en
+      required: [script]
+
+    JobSubmission:
+      type: object
+      properties:
+        job_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          example: queued
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+        status_url:
+          type: string
+          example: /api/v1/jobs/00000000-0000-4000-8000-000000000000
+      required: [job_id, status, progress, status_url]
+
+    JobStatus:
+      type: object
+      description: Job fields returned by the current in-memory job manager.
+      properties:
+        job_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          description: Current processing state.
+          example: running
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        request:
+          $ref: "#/components/schemas/CreateJobRequest"
+        result:
+          anyOf:
+            - $ref: "#/components/schemas/JobResult"
+            - type: "null"
+        error:
+          anyOf:
+            - type: object
+              additionalProperties: true
+            - type: string
+            - type: "null"
+      required:
+        - job_id
+        - status
+        - progress
+        - created_at
+        - updated_at
+        - request
+        - result
+        - error
+
+    JobResult:
+      type: object
+      properties:
+        video_file:
+          type: string
+          description: Local filesystem path to the generated MP4.
+        manifest_file:
+          type: string
+          description: Local filesystem path to the scene manifest.
+        subtitle_file:
+          type: string
+          description: Local filesystem path to the subtitle file.
+        duration_seconds:
+          type: number
+        resolution:
+          type: string
+          example: "1280x720"
+        scene_count:
+          type: integer
+        warnings:
+          type: array
+          items:
+            type: string
+      additionalProperties: true
+
+    HttpError:
+      type: object
+      required:
+        - code
+        - message
+        - retryable
+        - details
+      properties:
+        code:
+          type: string
+          description: Uppercase snake-case error code.
+          example: JOB_NOT_FOUND
+        message:
+          type: string
+          example: The requested job was not found.
+        retryable:
+          type: boolean
+          example: false
+        details:
+          type: object
+          additionalProperties: true
+          example:
+            job_id: nonexistent-test-job
+
+    ValidationError:
+      type: object
+      required:
+        - code
+        - message
+        - retryable
+        - details
+      properties:
+        code:
+          type: string
+          example: VALIDATION_ERROR
+        message:
+          type: string
+          example: The request contains missing or invalid fields.
+        retryable:
+          type: boolean
+          example: false
+        details:
+          type: object
+          properties:
+            errors:
+              type: array
+              items:
+                type: object
+                additionalProperties: true

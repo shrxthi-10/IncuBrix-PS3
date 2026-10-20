@@ -1,0 +1,23 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Python environment and caches
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local editor settings
+.vscode/
+
+# Generated media and reports
+outputs/*
+!outputs/.gitkeep
+
+# Downloaded stock footage
+test_inputs/broll/
+
+# Local copy of live API schema
+live-openapi.json

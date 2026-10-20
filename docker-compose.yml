@@ -1,0 +1,15 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      OUTPUT_DIR: /app/outputs
+      TEST_INPUT_DIR: /app/test_inputs
+      DEFAULT_ASPECT_RATIO: "16:9"
+    volumes:
+      - ./outputs:/app/outputs
+      - ./test_inputs:/app/test_inputs
+    restart: unless-stopped
