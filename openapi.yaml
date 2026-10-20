@@ -404,14 +404,18 @@ components:
 
     ApiError:
       type: object
-      required:
-        - code
-        - message
-        - retryable
-        - details
+      required: [error]
+      properties:
+        error:
+          $ref: "#/components/schemas/ErrorDetail"
+
+    ErrorDetail:
+      type: object
+      required: [code, message, retryable, details]
       properties:
         code:
           type: string
+          pattern: "^[A-Z][A-Z0-9_]*$"
           description: Uppercase snake-case error code.
           example: JOB_NOT_FOUND
         message:
