@@ -21,3 +21,16 @@ test_inputs/broll/
 
 # Local copy of live API schema
 live-openapi.json
+# Local backup scripts - do not submit
+app/services/*.backup.py
+app/services/*.pre_universal.py
+app/services/pixabay_test.py
+
+# Generated local test assets
+test_inputs/narration_*.mp3
+test_inputs/sample_narration.mp3
+test_inputs/sample_subtitles.srt
+
+# Accidental local filename
+cript-to-b-roll video generation prototype*
+app/services/broll_renderer_backup.py
