@@ -130,7 +130,7 @@ def render_video(
             "ffmpeg", "-y", "-hide_banner", "-loglevel", "warning",
             "-i", str(intermediate_path),
             "-vf", subtitle_filter,
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+            "-c:v", "libx264", "-threads", "1", "-preset", "ultrafast", "-crf", "28",
             "-pix_fmt", "yuv420p",
             "-c:a", "copy",
             "-movflags", "+faststart",
