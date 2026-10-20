@@ -17,9 +17,16 @@ from fastapi import (
 )
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from app.config import APP_NAME, API_PREFIX, MAX_AUDIO_SECONDS, TEST_INPUT_DIR
+from app.config import (
+    APP_NAME,
+    API_PREFIX,
+    MAX_AUDIO_SECONDS,
+    OUTPUT_DIR,
+    TEST_INPUT_DIR,
+)
 from app.services.job_manager import create_job, get_job
 from app.services.video_renderer import probe_duration
 from app.workers.job_worker import enqueue_job
@@ -28,6 +35,15 @@ app = FastAPI(
     title=APP_NAME,
     version="0.3.0",
     description="API for generating narrated videos with matched B-roll.",
+)
+
+VIDEO_OUTPUT_DIR = OUTPUT_DIR / "rendered_videos"
+VIDEO_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+app.mount(
+    "/outputs/videos",
+    StaticFiles(directory=str(VIDEO_OUTPUT_DIR)),
+    name="rendered-videos",
 )
 
 ALLOWED_AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a"}
@@ -252,7 +268,7 @@ async def submit_audio_job(
 
 
 @app.get(f"{API_PREFIX}/jobs/{{job_id}}")
-def job_status(job_id: str):
+def job_status(job_id: str, request: Request):
     job = get_job(job_id)
 
     if job is None:
@@ -265,7 +281,20 @@ def job_status(job_id: str):
             ),
         )
 
-    return job
+    response = job.copy()
+    result = job.get("result")
+
+    if job.get("status") == "succeeded" and result:
+        response["result"] = result.copy()
+        video_path = VIDEO_OUTPUT_DIR / f"{job_id}.mp4"
+
+        if video_path.is_file():
+            base_url = str(request.base_url).rstrip("/")
+            response["result"]["video_url"] = (
+                f"{base_url}/outputs/videos/{job_id}.mp4"
+            )
+
+    return response
 
 
 @app.exception_handler(HTTPException)
