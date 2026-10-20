@@ -46,6 +46,11 @@ def api_error(code: str, message: str, details=None, retryable=False):
     }
 
 
+def error_response(status_code: int, error: dict) -> JSONResponse:
+    """Return errors using the assessment's required envelope."""
+    return JSONResponse(status_code=status_code, content={"error": error})
+
+
 @app.middleware("http")
 async def add_trace_id(request: Request, call_next):
     trace_id = request.headers.get("X-Correlation-ID", str(uuid4()))
@@ -258,16 +263,16 @@ async def http_error_handler(request: Request, exc: HTTPException):
             retryable=exc.status_code >= 500,
         )
 
-    return JSONResponse(status_code=exc.status_code, content=error)
+    return error_response(exc.status_code, error)
 
 
 @app.exception_handler(RequestValidationError)
 async def validation_error_handler(
     request: Request, exc: RequestValidationError
 ):
-    return JSONResponse(
-        status_code=422,
-        content=api_error(
+    return error_response(
+        422,
+        api_error(
             "VALIDATION_ERROR",
             "The request contains missing or invalid fields.",
             {"errors": exc.errors()},
@@ -277,9 +282,9 @@ async def validation_error_handler(
 
 @app.exception_handler(Exception)
 async def unexpected_error_handler(request: Request, exc: Exception):
-    return JSONResponse(
-        status_code=500,
-        content=api_error(
+    return error_response(
+        500,
+        api_error(
             "INTERNAL_SERVER_ERROR",
             "An unexpected error occurred.",
             {
