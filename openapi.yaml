@@ -1,10 +1,12 @@
 openapi: 3.1.0
+
 info:
   title: IncuBrix Script-to-B-roll Video Engine API
-  version: 0.2.0
+  version: 0.3.0
   description: >
-    API for submitting asynchronous script-to-video jobs, checking their
-    status, and retrieving generated video and manifest paths.
+    API for submitting asynchronous script-to-video jobs from text or
+    uploaded audio, checking job status, and inspecting generated video,
+    subtitle, and manifest paths.
 
 servers:
   - url: http://127.0.0.1:8000
@@ -81,10 +83,10 @@ paths:
       operationId: createVideoJob
       summary: Submit a script-to-video job
       description: >
-        Creates an asynchronous job. Reusing an Idempotency-Key with the
-        same request returns the existing job. Reusing it with a different
-        request returns a conflict. Jobs are currently held in application
-        memory.
+        Creates an asynchronous text-to-video job. Reusing an
+        Idempotency-Key with the same request returns the existing job.
+        Reusing it with a different request returns a conflict.
+        Jobs are currently stored in application memory.
       parameters:
         - name: Idempotency-Key
           in: header
@@ -116,13 +118,95 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/HttpError"
+                $ref: "#/components/schemas/ApiError"
         "422":
           description: Request validation error or missing idempotency key
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ValidationError"
+                $ref: "#/components/schemas/ApiError"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /api/v1/jobs/audio:
+    post:
+      tags: [Jobs]
+      operationId: createAudioVideoJob
+      summary: Submit an audio-to-video job
+      description: >
+        Upload an MP3, WAV, or M4A audio file. The service transcribes
+        the audio, selects B-roll, and renders a video asynchronously.
+        The current implementation limits uploads to 100 MB and audio
+        duration to 600 seconds.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Unique client-generated key for this submission.
+          schema:
+            type: string
+            minLength: 1
+          example: 2b13fef3-b672-4f19-9a0c-1734bdc5f120
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [audio]
+              properties:
+                audio:
+                  type: string
+                  format: binary
+                  description: Audio file in MP3, WAV, or M4A format.
+                aspect_ratio:
+                  type: string
+                  default: "16:9"
+                narration_language:
+                  type: string
+                  default: en
+                  description: Language setting for the requested narration.
+      responses:
+        "202":
+          description: Audio job accepted for asynchronous processing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AudioJobSubmission"
+        "409":
+          description: Idempotency key reused with a different request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "413":
+          description: Uploaded audio exceeds the file-size limit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "415":
+          description: Unsupported audio file extension
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "422":
+          description: Empty, invalid, or too-long audio or invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
 
   /api/v1/jobs/{job_id}:
     get:
@@ -138,7 +222,7 @@ paths:
             format: uuid
       responses:
         "200":
-          description: Current job status, progress, and result if available
+          description: Current job status, progress, request, and result if available
           content:
             application/json:
               schema:
@@ -148,13 +232,19 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/HttpError"
+                $ref: "#/components/schemas/ApiError"
         "422":
           description: Invalid job ID path parameter
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ValidationError"
+                $ref: "#/components/schemas/ApiError"
+        "500":
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
 
 components:
   schemas:
@@ -191,9 +281,38 @@ components:
           example: /api/v1/jobs/00000000-0000-4000-8000-000000000000
       required: [job_id, status, progress, status_url]
 
+    AudioJobSubmission:
+      type: object
+      properties:
+        job_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          example: queued
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+        audio_duration_seconds:
+          type: number
+          exclusiveMinimum: 0
+          maximum: 600
+        status_url:
+          type: string
+          example: /api/v1/jobs/00000000-0000-4000-8000-000000000000
+      required:
+        - job_id
+        - status
+        - progress
+        - audio_duration_seconds
+        - status_url
+
     JobStatus:
       type: object
-      description: Job fields returned by the current in-memory job manager.
+      description: >
+        Job fields returned by the current in-memory job manager.
+        Audio jobs may include transcript and transcription metadata.
       properties:
         job_id:
           type: string
@@ -202,6 +321,7 @@ components:
           type: string
           description: Current processing state.
           example: running
+          enum: [queued, running, succeeded, failed]
         progress:
           type: integer
           minimum: 0
@@ -213,17 +333,25 @@ components:
           type: string
           format: date-time
         request:
-          $ref: "#/components/schemas/CreateJobRequest"
+          type: object
+          additionalProperties: true
+          description: Original job request, including input type.
         result:
           anyOf:
             - $ref: "#/components/schemas/JobResult"
             - type: "null"
         error:
           anyOf:
-            - type: object
-              additionalProperties: true
+            - $ref: "#/components/schemas/ApiError"
             - type: string
             - type: "null"
+        transcript:
+          type: string
+          description: Transcript produced for an audio input, when available.
+        transcription:
+          type: object
+          additionalProperties: true
+          description: Transcription language, probability, and model metadata.
       required:
         - job_id
         - status
@@ -242,7 +370,7 @@ components:
           description: Local filesystem path to the generated MP4.
         manifest_file:
           type: string
-          description: Local filesystem path to the scene manifest.
+          description: Local filesystem path to the render manifest.
         subtitle_file:
           type: string
           description: Local filesystem path to the subtitle file.
@@ -253,13 +381,28 @@ components:
           example: "1280x720"
         scene_count:
           type: integer
+        input_type:
+          type: string
+          enum: [text, audio]
+        transcript:
+          anyOf:
+            - type: string
+            - type: "null"
         warnings:
           type: array
           items:
             type: string
+      required:
+        - video_file
+        - manifest_file
+        - subtitle_file
+        - duration_seconds
+        - resolution
+        - scene_count
+        - warnings
       additionalProperties: true
 
-    HttpError:
+    ApiError:
       type: object
       required:
         - code
@@ -273,7 +416,7 @@ components:
           example: JOB_NOT_FOUND
         message:
           type: string
-          example: The requested job was not found.
+          example: No job exists with this ID.
         retryable:
           type: boolean
           example: false
@@ -282,29 +425,3 @@ components:
           additionalProperties: true
           example:
             job_id: nonexistent-test-job
-
-    ValidationError:
-      type: object
-      required:
-        - code
-        - message
-        - retryable
-        - details
-      properties:
-        code:
-          type: string
-          example: VALIDATION_ERROR
-        message:
-          type: string
-          example: The request contains missing or invalid fields.
-        retryable:
-          type: boolean
-          example: false
-        details:
-          type: object
-          properties:
-            errors:
-              type: array
-              items:
-                type: object
-                additionalProperties: true

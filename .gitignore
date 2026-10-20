@@ -34,3 +34,5 @@ test_inputs/sample_subtitles.srt
 # Accidental local filename
 cript-to-b-roll video generation prototype*
 app/services/broll_renderer_backup.py
+# Uploaded audio files used for local testing
+test_inputs/audio_uploads/

@@ -9,3 +9,4 @@ Pillow==13.0.0
 imageio-ffmpeg==0.6.0
 requests
 python-dotenv
+faster-whisper==1.2.1
